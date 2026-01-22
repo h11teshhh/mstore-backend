@@ -1,4 +1,12 @@
-__pycache__/
-.env
+# Virtual environment
 venv/
-.env.*
+__pycache__/
+
+# Environment variables
+.env
+
+# Python cache
+*.pyc
+
+# OS files
+.DS_Store

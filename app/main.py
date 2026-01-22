@@ -10,11 +10,11 @@ from app.routes.truck_load_routes import router as truck_load_router
 from app.routes.payment_routes import router as payment_router 
 from app.routes.end_of_day_routes import router as end_of_day_router
 from app.routes.auth_routes import router as auth_router
-from app.services.auth_service import create_superadmin
 from app.routes.user_routes import router as user_router
-
+from app.services.auth_service import create_superadmin
 
 from fastapi.middleware.cors import CORSMiddleware
+app = FastAPI(title="Mstore Backend")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,7 +25,6 @@ app.add_middleware(
 )
 
 
-app = FastAPI(title="Mstore Backend")
 
 app.include_router(inventory_router)
 app.include_router(inventory_movement_router)
