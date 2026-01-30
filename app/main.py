@@ -50,3 +50,7 @@ async def startup():
 @app.get("/")
 def root():
     return {"message": "Mstore backend is running"}
+
+@app.get("/")
+async def health():
+    return {"status": "Backend running"}
