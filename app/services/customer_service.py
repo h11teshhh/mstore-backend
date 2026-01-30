@@ -4,10 +4,10 @@ from fastapi import HTTPException
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from app.database import customers_collection
 
-SYSTEM_USER_ID = ObjectId("696f3a0797dacdd4c345551b")
 
 
-async def create_customer(data: dict):
+
+async def create_customer(data: dict, current_user_id: str):
     customer = {
         "role": "customer",
         "name": data["name"],
@@ -15,7 +15,7 @@ async def create_customer(data: dict):
         "area": data["area"],
         "current_due": 0,
         "is_active": True,
-        "created_by": SYSTEM_USER_ID,
+        "created_by": ObjectId(current_user_id),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
@@ -60,14 +60,18 @@ async def create_customer(data: dict):
 async def get_all_customers():
     customers = []
     async for c in customers_collection.find({"is_active": True}):
+        updated_at = c.get("updated_at") or c.get("created_at") or datetime.utcnow()
+
         customers.append({
             "id": str(c["_id"]),
-            "role": c["role"],
-            "name": c["name"],
-            "mobile": c["mobile"],
-            "area": c["area"],
-            "current_due": c["current_due"],
-            "is_active": c["is_active"]
+            "role": c.get("role", "customer"),
+            "name": c.get("name"),
+            "mobile": c.get("mobile"),
+            "area": c.get("area"),
+            "current_due": c.get("current_due", 0),
+            "is_active": c.get("is_active", True),
+            "created_at": c.get("created_at"),
+            "updated_at": updated_at
         })
     return customers
 
@@ -87,12 +91,20 @@ async def update_customer(customer_id: str, data: dict):
     return {"message": "Customer updated successfully"}
 
 async def get_customer_by_id(customer_id: str):
-    customer = await customers_collection.find_one({"_id": ObjectId(customer_id)})
+    try:
+        obj_id = ObjectId(customer_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid customer_id")
+
+    customer = await customers_collection.find_one({"_id": obj_id})
 
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
     customer["id"] = str(customer["_id"])
     del customer["_id"]
+
+    if "updated_at" not in customer or customer["updated_at"] is None:
+        customer["updated_at"] = customer.get("created_at", datetime.utcnow())
 
     return customer

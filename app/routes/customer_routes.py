@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from app.schemas.customer import (
     CustomerCreate,
     CustomerUpdate,
@@ -10,13 +10,20 @@ from app.services.customer_service import (
     get_customer_by_id,
     update_customer
 )
+from app.dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/customers", tags=["Customers"])
 
 
 @router.post("/", response_model=CustomerResponse)
-async def add_customer(customer: CustomerCreate):
-    return await create_customer(customer.dict())
+async def add_customer(
+    customer: CustomerCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["role"] != "SUPERADMIN":
+        raise HTTPException(status_code=403, detail="Only SUPERADMIN can create customers")
+
+    return await create_customer(customer.dict(), current_user["id"])
 
 
 @router.get("/", response_model=list[CustomerResponse])
