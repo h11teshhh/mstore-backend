@@ -12,7 +12,12 @@ from app.database import (
 
 
 async def get_payments_by_customer(customer_id: str):
-    cursor = payments_collection.find({"customer_id": customer_id})
+    try:
+        customer_obj_id = ObjectId(customer_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid customer_id")
+
+    cursor = payments_collection.find({"customer_id": customer_obj_id})
     payments = []
 
     async for payment in cursor:
@@ -50,10 +55,13 @@ async def complete_payment(order_id: str, customer_id: str, current_user_id: str
         {"$set": {"new_due": 0}}
     )
 
-    # Update customer due
+    # Update customer due and last activity
     await customers_collection.update_one(
         {"_id": ObjectId(customer_id)},
-        {"$inc": {"current_due": -amount}}
+        {
+            "$inc": {"current_due": -amount},
+            "$set": {"updated_at": datetime.utcnow()}
+        }
     )
 
     # Close order
@@ -100,10 +108,13 @@ async def partial_payment(order_id: str, customer_id: str, amount: float, curren
         {"$set": {"new_due": new_due}}
     )
 
-    # Update customer due
+    # Update customer due and last activity
     await customers_collection.update_one(
         {"_id": ObjectId(customer_id)},
-        {"$inc": {"current_due": -amount}}
+        {
+            "$inc": {"current_due": -amount},
+            "$set": {"updated_at": datetime.utcnow()}
+        }
     )
 
     # Update order status

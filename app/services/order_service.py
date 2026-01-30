@@ -13,7 +13,12 @@ from app.database import (
 from app.services.inventory_stock_service import get_current_stock
 
 async def get_orders_by_customer(customer_id: str):
-    cursor = orders_collection.find({"customer_id": customer_id})
+    try:
+        customer_obj_id = ObjectId(customer_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid customer_id")
+
+    cursor = orders_collection.find({"customer_id": customer_obj_id})
     orders = []
 
     async for order in cursor:
@@ -80,7 +85,8 @@ async def create_order(data: dict, current_user: dict):
                 "status": "CREATED",
                 "created_by": ObjectId(current_user["id"]),
                 "created_by_role": current_user["role"],
-                "created_at": datetime.utcnow()
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
             }
 
             order_result = await orders_collection.insert_one(
