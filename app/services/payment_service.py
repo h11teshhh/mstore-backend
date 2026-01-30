@@ -9,10 +9,20 @@ from app.database import (
     bills_collection,
 )
 
-SYSTEM_USER_ID = ObjectId("696f3a0797dacdd4c345551b")
 
 
-async def complete_payment(order_id: str, customer_id: str):
+async def get_payments_by_customer(customer_id: str):
+    cursor = payments_collection.find({"customer_id": customer_id})
+    payments = []
+
+    async for payment in cursor:
+        payment["id"] = str(payment["_id"])
+        del payment["_id"]
+        payments.append(payment)
+
+    return payments
+
+async def complete_payment(order_id: str, customer_id: str, current_user_id: str):
     bill = await bills_collection.find_one({"order_id": ObjectId(order_id)})
 
     if not bill:
@@ -30,7 +40,7 @@ async def complete_payment(order_id: str, customer_id: str):
         "amount": amount,
         "type": "FULL",
         "received_by": "delivery",
-        "created_by": SYSTEM_USER_ID,
+        "created_by": ObjectId(current_user_id),
         "created_at": datetime.utcnow()
     })
 
@@ -59,7 +69,7 @@ async def complete_payment(order_id: str, customer_id: str):
     }
 
 
-async def partial_payment(order_id: str, customer_id: str, amount: float):
+async def partial_payment(order_id: str, customer_id: str, amount: float, current_user_id: str):
     if amount <= 0:
         raise HTTPException(400, "Invalid payment amount")
 
@@ -80,7 +90,7 @@ async def partial_payment(order_id: str, customer_id: str, amount: float):
         "amount": amount,
         "type": "PARTIAL",
         "received_by": "delivery",
-        "created_by": SYSTEM_USER_ID,
+        "created_by": ObjectId(current_user_id),
         "created_at": datetime.utcnow()
     })
 

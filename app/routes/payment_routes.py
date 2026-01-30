@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import (APIRouter, Depends, Query)
 from app.schemas.payment import CompletePaymentRequest, PartialPaymentRequest
-from app.services.payment_service import complete_payment, partial_payment
+from app.services.payment_service import complete_payment, get_payments_by_customer, partial_payment
 from app.dependencies.roles import require_roles
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
@@ -27,3 +27,7 @@ async def pay_partial(
         data.customer_id,
         data.amount
     )
+
+@router.get("/")
+async def list_payments_by_customer(customer_id: str = Query(...)):
+    return await get_payments_by_customer(customer_id)

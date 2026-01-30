@@ -12,6 +12,16 @@ from app.database import (
 )
 from app.services.inventory_stock_service import get_current_stock
 
+async def get_orders_by_customer(customer_id: str):
+    cursor = orders_collection.find({"customer_id": customer_id})
+    orders = []
+
+    async for order in cursor:
+        order["id"] = str(order["_id"])
+        del order["_id"]
+        orders.append(order)
+
+    return orders
 
 async def create_order(data: dict, current_user: dict):
     async with await client.start_session() as session:
