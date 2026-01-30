@@ -1,3 +1,4 @@
+import datetime
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -23,3 +24,5 @@ class CustomerResponse(BaseModel):
     area: str
     current_due: float
     is_active: bool
+    created_at: datetime
+    updated_at: datetime

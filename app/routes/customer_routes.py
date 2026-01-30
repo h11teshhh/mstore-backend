@@ -7,6 +7,7 @@ from app.schemas.customer import (
 from app.services.customer_service import (
     create_customer,
     get_all_customers,
+    get_customer_by_id,
     update_customer
 )
 
@@ -21,6 +22,11 @@ async def add_customer(customer: CustomerCreate):
 @router.get("/", response_model=list[CustomerResponse])
 async def list_customers():
     return await get_all_customers()
+
+
+@router.get("/{customer_id}/", response_model=CustomerResponse)
+async def get_customer(customer_id: str):
+    return await get_customer_by_id(customer_id)
 
 
 @router.put("/{customer_id}")

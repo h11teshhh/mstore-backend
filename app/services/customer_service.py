@@ -2,7 +2,6 @@ from datetime import datetime
 from bson import ObjectId
 from fastapi import HTTPException
 from pymongo.errors import DuplicateKeyError, PyMongoError
-
 from app.database import customers_collection
 
 SYSTEM_USER_ID = ObjectId("696f3a0797dacdd4c345551b")
@@ -86,3 +85,14 @@ async def update_customer(customer_id: str, data: dict):
         raise HTTPException(404, "Customer not found")
 
     return {"message": "Customer updated successfully"}
+
+async def get_customer_by_id(customer_id: str):
+    customer = await customers_collection.find_one({"_id": ObjectId(customer_id)})
+
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    customer["id"] = str(customer["_id"])
+    del customer["_id"]
+
+    return customer
