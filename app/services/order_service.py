@@ -12,6 +12,10 @@ from app.database import (
 )
 from app.services.inventory_stock_service import get_current_stock
 
+
+# -------------------------
+# GET ORDERS BY CUSTOMER
+# -------------------------
 async def get_orders_by_customer(customer_id: str):
     try:
         customer_obj_id = ObjectId(customer_id)
@@ -19,26 +23,43 @@ async def get_orders_by_customer(customer_id: str):
         raise HTTPException(status_code=400, detail="Invalid customer_id")
 
     cursor = orders_collection.find({"customer_id": customer_obj_id})
-    orders = []
 
+    orders = []
     async for order in cursor:
-        order["id"] = str(order["_id"])
-        del order["_id"]
-        orders.append(order)
+        orders.append({
+            "id": str(order["_id"]),
+            "customer_id": str(order["customer_id"]),
+            "total_amount": order.get("total_amount", 0),
+            "status": order.get("status", "CREATED"),
+            "created_by": str(order["created_by"]),
+            "created_by_role": order.get("created_by_role"),
+            "created_at": order.get("created_at"),
+            "updated_at": order.get("updated_at"),
+        })
 
     return orders
 
+
+# -------------------------
+# CREATE ORDER
+# -------------------------
 async def create_order(data: dict, current_user: dict):
     async with await client.start_session() as session:
         async with session.start_transaction():
 
             # 1️⃣ Validate customer
+            try:
+                customer_id = ObjectId(data["customer_id"])
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid customer_id")
+
             customer = await customers_collection.find_one(
-                {"_id": ObjectId(data["customer_id"]), "is_active": True},
+                {"_id": customer_id, "is_active": True},
                 session=session
             )
+
             if not customer:
-                raise HTTPException(404, "Customer not found")
+                raise HTTPException(status_code=404, detail="Customer not found")
 
             previous_due = customer.get("current_due", 0)
             total_amount = 0
@@ -46,24 +67,29 @@ async def create_order(data: dict, current_user: dict):
 
             # 2️⃣ Process items
             for item in data["items"]:
-                item_id = ObjectId(item["item_id"])
+                try:
+                    item_id = ObjectId(item["item_id"])
+                except Exception:
+                    raise HTTPException(status_code=400, detail="Invalid item_id")
+
                 quantity = item["quantity"]
 
                 if quantity <= 0:
-                    raise HTTPException(400, "Quantity must be greater than zero")
+                    raise HTTPException(status_code=400, detail="Quantity must be greater than zero")
 
                 inventory_item = await inventory_collection.find_one(
                     {"_id": item_id, "is_active": True},
                     session=session
                 )
+
                 if not inventory_item:
-                    raise HTTPException(404, "Inventory item not found")
+                    raise HTTPException(status_code=404, detail="Inventory item not found")
 
                 current_stock = await get_current_stock(str(item_id))
                 if quantity > current_stock:
                     raise HTTPException(
-                        400,
-                        f"Insufficient stock for {inventory_item['item_name']}"
+                        status_code=400,
+                        detail=f"Insufficient stock for {inventory_item['item_name']}"
                     )
 
                 price = inventory_item["price"]
@@ -78,7 +104,7 @@ async def create_order(data: dict, current_user: dict):
                     "total": line_total
                 })
 
-            # 3️⃣ Create order
+            # 3️⃣ Create order document
             order_doc = {
                 "customer_id": customer["_id"],
                 "total_amount": total_amount,
@@ -89,13 +115,10 @@ async def create_order(data: dict, current_user: dict):
                 "updated_at": datetime.utcnow()
             }
 
-            order_result = await orders_collection.insert_one(
-                order_doc,
-                session=session
-            )
-            order_id = order_result.inserted_id
+            result = await orders_collection.insert_one(order_doc, session=session)
+            order_id = result.inserted_id
 
-            # 4️⃣ Stock OUT
+            # 4️⃣ Inventory OUT movement
             for item in items_snapshot:
                 await inventory_itemdetails_collection.insert_one(
                     {
@@ -108,7 +131,7 @@ async def create_order(data: dict, current_user: dict):
                     session=session
                 )
 
-            # 5️⃣ Bill
+            # 5️⃣ Bill creation
             new_due = previous_due + total_amount
 
             await bills_collection.insert_one(
