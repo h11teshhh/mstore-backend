@@ -1,49 +1,34 @@
-# app/services/report_service.py
-
 from datetime import datetime, timedelta
 from bson import ObjectId
-from app.database import (
-    customers_collection,
-    orders_collection,
-    bills_collection,
-    inventory_collection
-)
+from app.database import orders_collection, customers_collection, bills_collection
 
 
 async def get_today_bills_by_area(area: str):
-    # 📅 today range
-    today = datetime.utcnow().date()
-    start = datetime(today.year, today.month, today.day)
+    start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=1)
-
-    # 1️⃣ find customers in area
-    customers_cursor = customers_collection.find({"area": area})
-    customers = []
-    async for c in customers_cursor:
-        customers.append(c)
-
-    if not customers:
-        return {"date": today.isoformat(), "orders": []}
-
-    customer_ids = [c["_id"] for c in customers]
-
-    # 2️⃣ find today's orders
-    orders_cursor = orders_collection.find({
-        "customer_id": {"$in": customer_ids},
-        "created_at": {"$gte": start, "$lt": end}
-    })
 
     results = []
 
-    async for order in orders_cursor:
+    cursor = orders_collection.find({
+        "created_at": {"$gte": start, "$lt": end}
+    })
+
+    async for order in cursor:
+        customer = await customers_collection.find_one(
+            {"_id": order["customer_id"], "area": area}
+        )
+
+        if not customer:
+            continue  # skip if customer not in selected area
+
         bill = await bills_collection.find_one({"order_id": order["_id"]})
+
         if not bill:
             continue
 
-        items_response = []
-
+        items = []
         for item in bill["items"]:
-            items_response.append({
+            items.append({
                 "item_id": str(item["item_id"]),
                 "item_name": item["item_name"],
                 "quantity": item["quantity"],
@@ -53,15 +38,16 @@ async def get_today_bills_by_area(area: str):
 
         results.append({
             "order_id": str(order["_id"]),
-            "customer_name": str(order["customer_name"]),
+            "customer_id": str(customer["_id"]),
+            "customer_name": customer["name"],   # ✅ now safe
             "created_at": order["created_at"],
-            "bill_amount": bill["bill_amount"],
             "remaining_due": bill["new_due"],
-            "items": items_response
+            "bill_amount": bill["total_amount"],
+            "items": items
         })
 
     return {
-        "date": today.isoformat(),
-        "total_orders": len(results),
+        "date": start.date().isoformat(),
+        "area": area,
         "orders": results
     }
