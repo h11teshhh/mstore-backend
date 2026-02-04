@@ -15,7 +15,7 @@ async def get_today_bills_by_area(area: str):
 
     async for order in cursor:
         customer = await customers_collection.find_one(
-            {"_id": order["customer_id"], "area": area}
+            {"_id": order.get("customer_id"), "area": area}
         )
 
         if not customer:
@@ -27,27 +27,32 @@ async def get_today_bills_by_area(area: str):
             continue
 
         items = []
-        for item in bill["items"]:
+        for item in bill.get("items", []):
             items.append({
-                "item_id": str(item["item_id"]),
-                "item_name": item["item_name"],
-                "quantity": item["quantity"],
-                "price": item["price"],
-                "total": item["total"]
+                "item_id": str(item.get("item_id")),
+                "item_name": item.get("item_name", ""),
+                "quantity": item.get("quantity", 0),
+                "price": float(item.get("price", 0)),
+                "total": float(item.get("total", 0)),
             })
+
+        bill_amount = bill.get("bill_amount")
+        if bill_amount is None:
+            bill_amount = bill.get("new_due", 0)
 
         results.append({
             "order_id": str(order["_id"]),
             "customer_id": str(customer["_id"]),
-            "customer_name": customer["name"],   # ✅ now safe
-            "created_at": order["created_at"],
-            "remaining_due": bill["new_due"],
-            "bill_amount": bill["total_amount"],
-            "items": items
+            "customer_name": customer.get("name", ""),
+            "created_at": order.get("created_at"),
+            "remaining_due": float(bill.get("new_due", 0)),
+            "bill_amount": float(bill_amount),
+            "items": items,
         })
 
     return {
         "date": start.date().isoformat(),
         "area": area,
-        "orders": results
+        "total_orders": len(results),
+        "orders": results,
     }
