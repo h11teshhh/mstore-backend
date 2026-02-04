@@ -19,10 +19,9 @@ async def get_today_bills_by_area(area: str):
         )
 
         if not customer:
-            continue  # skip if customer not in selected area
+            continue
 
         bill = await bills_collection.find_one({"order_id": order["_id"]})
-
         if not bill:
             continue
 
@@ -31,22 +30,18 @@ async def get_today_bills_by_area(area: str):
             items.append({
                 "item_id": str(item.get("item_id")),
                 "item_name": item.get("item_name", ""),
-                "quantity": item.get("quantity", 0),
+                "quantity": int(item.get("quantity", 0)),
                 "price": float(item.get("price", 0)),
                 "total": float(item.get("total", 0)),
             })
-
-        bill_amount = bill.get("bill_amount")
-        if bill_amount is None:
-            bill_amount = bill.get("new_due", 0)
 
         results.append({
             "order_id": str(order["_id"]),
             "customer_id": str(customer["_id"]),
             "customer_name": customer.get("name", ""),
             "created_at": order.get("created_at"),
-            "remaining_due": float(bill.get("new_due", 0)),
-            "bill_amount": float(bill_amount),
+            "remaining_due": float(bill.get("new_due", 0)),   # ✅ per order
+            "bill_amount": float(bill.get("bill_amount", 0)),
             "items": items,
         })
 

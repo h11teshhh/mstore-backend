@@ -31,7 +31,7 @@ async def get_orders_by_customer(customer_id: str):
             "customer_id": str(order["customer_id"]),
             "total_amount": order.get("total_amount", 0),
             "status": order.get("status", "CREATED"),
-            "created_by": str(order["created_by"]),
+            "created_by": str(order.get("created_by")),
             "created_by_role": order.get("created_by_role"),
             "created_at": order.get("created_at"),
             "updated_at": order.get("updated_at"),
@@ -71,7 +71,7 @@ async def create_order(data: dict, current_user: dict):
                 except Exception:
                     raise HTTPException(status_code=400, detail="Invalid item_id")
 
-                quantity = item["quantity"]
+                quantity = int(item["quantity"])
 
                 if quantity <= 0:
                     raise HTTPException(status_code=400, detail="Quantity must be greater than zero")
@@ -92,7 +92,7 @@ async def create_order(data: dict, current_user: dict):
                         detail=f"Insufficient stock for {inventory_item['item_name']}"
                     )
 
-                price = inventory_item["price"]
+                price = float(inventory_item["price"])
                 line_total = price * quantity
                 total_amount += line_total
 
@@ -131,14 +131,14 @@ async def create_order(data: dict, current_user: dict):
                     session=session
                 )
 
-            # 5️⃣ Bill creation (IMPORTANT FIX)
+            # 5️⃣ Bill creation (per-order due only)
             await bills_collection.insert_one(
                 {
                     "order_id": order_id,
                     "customer_id": customer["_id"],
                     "items": items_snapshot,
                     "bill_amount": total_amount,
-                    "new_due": total_amount,  # bill due is ONLY this order
+                    "new_due": total_amount,  # ✅ per order only
                     "created_at": datetime.utcnow()
                 },
                 session=session
