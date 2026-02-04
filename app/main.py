@@ -12,7 +12,7 @@ from app.routes.end_of_day_routes import router as end_of_day_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.user_routes import router as user_router
 from app.services.auth_service import create_superadmin
-
+from app.routes.report_routes import router as report_router
 from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="Mstore Backend")
 
@@ -37,7 +37,7 @@ app.include_router(payment_router)
 app.include_router(end_of_day_router)
 app.include_router(auth_router)
 app.include_router(user_router)
-
+app.include_router(report_router)
 
 @app.on_event("startup")
 async def startup():
