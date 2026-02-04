@@ -52,10 +52,12 @@ async def complete_payment(order_id: str, customer_id: str, current_user_id: str
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
 
-    if bill.get("new_due", 0) <= 0:
+    remaining_due = bill.get("new_due", 0)
+
+    if remaining_due <= 0:
         raise HTTPException(status_code=400, detail="Bill already settled")
 
-    amount = bill["new_due"]
+    amount = remaining_due
 
     # Save payment
     await payments_collection.insert_one({
@@ -74,7 +76,7 @@ async def complete_payment(order_id: str, customer_id: str, current_user_id: str
         {"$set": {"new_due": 0}}
     )
 
-    # Update customer due and activity
+    # Update customer running due
     await customers_collection.update_one(
         {"_id": customer_obj_id},
         {
@@ -86,7 +88,12 @@ async def complete_payment(order_id: str, customer_id: str, current_user_id: str
     # Close order
     await orders_collection.update_one(
         {"_id": order_obj_id},
-        {"$set": {"status": "CLOSED", "closed_at": datetime.utcnow()}},
+        {
+            "$set": {
+                "status": "CLOSED",
+                "closed_at": datetime.utcnow(),
+            }
+        },
     )
 
     return {
@@ -114,10 +121,15 @@ async def partial_payment(order_id: str, customer_id: str, amount: float, curren
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
 
-    if amount > bill.get("new_due", 0):
+    remaining_due = bill.get("new_due", 0)
+
+    if remaining_due <= 0:
+        raise HTTPException(status_code=400, detail="Bill already settled")
+
+    if amount > remaining_due:
         raise HTTPException(status_code=400, detail="Payment exceeds bill due")
 
-    new_due = bill["new_due"] - amount
+    new_due = remaining_due - amount
 
     # Save payment
     await payments_collection.insert_one({
@@ -136,7 +148,7 @@ async def partial_payment(order_id: str, customer_id: str, amount: float, curren
         {"$set": {"new_due": new_due}},
     )
 
-    # Update customer due and activity
+    # Update customer running due
     await customers_collection.update_one(
         {"_id": customer_obj_id},
         {
@@ -148,7 +160,12 @@ async def partial_payment(order_id: str, customer_id: str, amount: float, curren
     # Update order status
     await orders_collection.update_one(
         {"_id": order_obj_id},
-        {"$set": {"status": "DELIVERED", "delivered_at": datetime.utcnow()}},
+        {
+            "$set": {
+                "status": "DELIVERED",
+                "delivered_at": datetime.utcnow(),
+            }
+        },
     )
 
     return {

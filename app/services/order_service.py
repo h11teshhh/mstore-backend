@@ -74,10 +74,7 @@ async def create_order(data: dict, current_user: dict):
                 quantity = item["quantity"]
 
                 if quantity <= 0:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Quantity must be greater than zero"
-                    )
+                    raise HTTPException(status_code=400, detail="Quantity must be greater than zero")
 
                 inventory_item = await inventory_collection.find_one(
                     {"_id": item_id, "is_active": True},
@@ -85,12 +82,10 @@ async def create_order(data: dict, current_user: dict):
                 )
 
                 if not inventory_item:
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Inventory item not found"
-                    )
+                    raise HTTPException(status_code=404, detail="Inventory item not found")
 
                 current_stock = await get_current_stock(str(item_id))
+
                 if quantity > current_stock:
                     raise HTTPException(
                         status_code=400,
@@ -109,7 +104,7 @@ async def create_order(data: dict, current_user: dict):
                     "total": line_total
                 })
 
-            # 3️⃣ Create order document
+            # 3️⃣ Create order
             order_doc = {
                 "customer_id": customer["_id"],
                 "total_amount": total_amount,
@@ -123,7 +118,7 @@ async def create_order(data: dict, current_user: dict):
             result = await orders_collection.insert_one(order_doc, session=session)
             order_id = result.inserted_id
 
-            # 4️⃣ Inventory OUT movement
+            # 4️⃣ Inventory OUT
             for item in items_snapshot:
                 await inventory_itemdetails_collection.insert_one(
                     {
@@ -136,20 +131,20 @@ async def create_order(data: dict, current_user: dict):
                     session=session
                 )
 
-            # 5️⃣ Bill creation (FIXED)
+            # 5️⃣ Bill creation (IMPORTANT FIX)
             await bills_collection.insert_one(
                 {
                     "order_id": order_id,
                     "customer_id": customer["_id"],
                     "items": items_snapshot,
                     "bill_amount": total_amount,
-                    "new_due": total_amount,  # ✅ only this order amount
+                    "new_due": total_amount,  # bill due is ONLY this order
                     "created_at": datetime.utcnow()
                 },
                 session=session
             )
 
-            # 6️⃣ Update customer total due (FIXED)
+            # 6️⃣ Update customer running due
             await customers_collection.update_one(
                 {"_id": customer["_id"]},
                 {
