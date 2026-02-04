@@ -16,8 +16,9 @@ async def pay_complete(
     current_user=Depends(require_roles("SUPERADMIN", "ADMIN", "DELIVERY"))
 ):
     return await complete_payment(
-        data.order_id,
-        data.customer_id
+        order_id=data.order_id,
+        customer_id=data.customer_id,
+        current_user_id=current_user["user_id"]   # ✅ FIX
     )
 
 
@@ -27,10 +28,12 @@ async def pay_partial(
     current_user=Depends(require_roles("SUPERADMIN", "ADMIN", "DELIVERY"))
 ):
     return await partial_payment(
-        data.order_id,
-        data.customer_id,
-        data.amount
+        order_id=data.order_id,
+        customer_id=data.customer_id,
+        amount=data.amount,
+        current_user_id=current_user["user_id"]   # ✅ FIX
     )
+
 
 @router.get("/")
 async def list_payments_by_customer(
