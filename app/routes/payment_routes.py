@@ -18,7 +18,7 @@ async def pay_complete(
     return await complete_payment(
         order_id=data.order_id,
         customer_id=data.customer_id,
-        current_user_id=current_user["user_id"]   # ✅ FIX
+        current_user_id=current_user["id"]   # ✅ FIXED
     )
 
 
@@ -31,7 +31,7 @@ async def pay_partial(
         order_id=data.order_id,
         customer_id=data.customer_id,
         amount=data.amount,
-        current_user_id=current_user["user_id"]   # ✅ FIX
+        current_user_id=current_user["id"]   # ✅ FIXED
     )
 
 
