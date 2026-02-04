@@ -53,7 +53,7 @@ async def get_today_bills_by_area(area: str):
 
         results.append({
             "order_id": str(order["_id"]),
-            "customer_id": str(order["customer_id"]),
+            "customer_name": str(order["customer_name"]),
             "created_at": order["created_at"],
             "bill_amount": bill["bill_amount"],
             "remaining_due": bill["new_due"],
