@@ -48,14 +48,17 @@ async def create_customer(data: dict, current_user_id: str):
         )
 
     return {
-        "id": str(result.inserted_id),
-        "role": "customer",
-        "name": customer["name"],
-        "mobile": customer["mobile"],
-        "area": customer["area"],
-        "current_due": 0,
-        "is_active": True
-    }
+    "id": str(result.inserted_id),
+    "role": "customer",
+    "name": customer["name"],
+    "mobile": customer["mobile"],
+    "area": customer["area"],
+    "current_due": customer["current_due"],
+    "is_active": customer["is_active"],
+    "created_at": customer["created_at"],
+    "updated_at": customer["updated_at"],
+}
+
 
 async def get_all_customers():
     customers = []
