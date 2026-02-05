@@ -11,3 +11,8 @@ class PartialPaymentRequest(BaseModel):
     order_id: str
     customer_id: str
     amount: float
+
+
+class CustomerPaymentRequest(BaseModel):
+    customer_id: str
+    amount: float
