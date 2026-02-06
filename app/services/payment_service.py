@@ -9,6 +9,33 @@ from app.database import (
     bills_collection,
     client,
 )
+# -------------------------------------------------
+# GET PAYMENTS BY CUSTOMER
+# -------------------------------------------------
+async def get_payments_by_customer(customer_id: str):
+    try:
+        customer_obj_id = ObjectId(customer_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid customer_id")
+
+    payments = []
+
+    cursor = payments_collection.find(
+        {"customer_id": customer_obj_id}
+    ).sort("created_at", 1)
+
+    async for p in cursor:
+        payments.append({
+            "id": str(p["_id"]),
+            "order_id": str(p.get("order_id")) if p.get("order_id") else None,
+            "customer_id": str(p.get("customer_id")),
+            "amount": float(p.get("amount", 0)),
+            "payment_status": p.get("payment_status"),
+            "received_by": p.get("received_by"),
+            "created_at": p.get("created_at"),
+        })
+
+    return payments
 
 # -------------------------------------------------
 # CUSTOMER PAYMENT (FIFO – SINGLE SOURCE OF TRUTH)
