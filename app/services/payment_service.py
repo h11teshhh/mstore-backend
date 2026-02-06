@@ -10,8 +10,13 @@ from app.database import (
     client,
 )
 # -------------------------------------------------
-# GET PAYMENTS BY CUSTOMER
+# GET PAYMENTS BY CUSTOMER (SERIALIZATION SAFE)
 # -------------------------------------------------
+from bson import ObjectId
+from fastapi import HTTPException
+from app.database import payments_collection
+
+
 async def get_payments_by_customer(customer_id: str):
     try:
         customer_obj_id = ObjectId(customer_id)
@@ -20,19 +25,35 @@ async def get_payments_by_customer(customer_id: str):
 
     payments = []
 
-    cursor = payments_collection.find(
-        {"customer_id": customer_obj_id}
-    ).sort("created_at", 1)
+    cursor = (
+        payments_collection
+        .find({"customer_id": customer_obj_id})
+        .sort("created_at", 1)
+    )
 
-    async for p in cursor:
+    async for payment in cursor:
+        received_by = payment.get("received_by", {})
+
         payments.append({
-            "id": str(p["_id"]),
-            "order_id": str(p.get("order_id")) if p.get("order_id") else None,
-            "customer_id": str(p.get("customer_id")),
-            "amount": float(p.get("amount", 0)),
-            "payment_status": p.get("payment_status"),
-            "received_by": p.get("received_by"),
-            "created_at": p.get("created_at"),
+            "id": str(payment["_id"]),
+            "order_id": (
+                str(payment["order_id"])
+                if payment.get("order_id")
+                else None
+            ),
+            "customer_id": str(payment["customer_id"]),
+            "amount": float(payment.get("amount", 0)),
+            "payment_status": payment.get("payment_status"),
+            "received_by": {
+                "id": (
+                    str(received_by["id"])
+                    if received_by.get("id")
+                    else None
+                ),
+                "role": received_by.get("role"),
+                "name": received_by.get("name"),
+            },
+            "created_at": payment.get("created_at"),
         })
 
     return payments
