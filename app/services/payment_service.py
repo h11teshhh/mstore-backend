@@ -33,7 +33,6 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                 {"_id": customer_obj_id},
                 session=session
             )
-
             if not customer:
                 raise HTTPException(status_code=404, detail="Customer not found")
 
@@ -51,8 +50,8 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                     detail=f"Entered amount ₹{amount} exceeds pending due ₹{current_due}"
                 )
 
-            remaining_amount = amount
-            total_paid = 0
+            remaining_amount = float(amount)
+            total_paid = 0.0
             bills_settled = []
 
             # 2️⃣ Fetch unpaid bills FIFO (oldest first)
@@ -83,13 +82,14 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                     "COMPLETE" if new_bill_due == 0 else "PARTIAL"
                 )
 
-                # 3️⃣ Insert payment record (per bill)
+                # 3️⃣ Record payment (per bill)
                 await payments_collection.insert_one(
                     {
                         "order_id": bill.get("order_id"),
                         "customer_id": customer_obj_id,
                         "amount": pay_amount,
-                        "type": current_user.get("role"),  # who performed action
+                        "payment_type": "CUSTOMER_PAYMENT",
+                        "payment_method": "CASH",  # default, extend later
                         "received_by": {
                             "id": user_obj_id,
                             "role": current_user.get("role"),
@@ -109,7 +109,7 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                     session=session
                 )
 
-                # 5️⃣ Close order if bill fully paid
+                # 5️⃣ Close order if bill fully settled
                 if new_bill_due == 0 and bill.get("order_id"):
                     await orders_collection.update_one(
                         {"_id": bill["order_id"]},
@@ -131,7 +131,7 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                     "status": payment_status,
                 })
 
-            if total_paid == 0:
+            if total_paid <= 0:
                 raise HTTPException(
                     status_code=400,
                     detail="No unpaid bills found for customer"
@@ -151,6 +151,6 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                 "message": "Payment received successfully",
                 "entered_amount": amount,
                 "accepted_amount": total_paid,
-                "remaining_due": current_due - total_paid,
+                "remaining_due": max(current_due - total_paid, 0),
                 "bills_settled": bills_settled,
             }

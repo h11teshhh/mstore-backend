@@ -15,7 +15,6 @@ from app.services.auth_service import create_superadmin
 from app.routes.report_routes import router as report_router
 from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="Mstore Backend")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # later restrict
@@ -23,8 +22,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
 
 app.include_router(inventory_router)
 app.include_router(inventory_movement_router)
