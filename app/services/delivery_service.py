@@ -1,14 +1,17 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from bson import ObjectId
 from app.database import (
     orders_collection,
     customers_collection,
     bills_collection,
 )
+from app.utils.time_utils import get_ist_now  # ✅ IST utility
 
 
 async def get_today_delivery_list():
-    start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    # ✅ IST start of day
+    now_ist = get_ist_now()
+    start = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=1)
 
     pipeline = [

@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta
 from bson import ObjectId
 from app.database import orders_collection, customers_collection, bills_collection
+from app.utils.time_utils import get_ist_today_range  # ✅ IST utility
 
 
 async def get_today_bills_by_area(area: str):
-    start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
+    # ✅ Get IST start & end of today
+    start, end = get_ist_today_range()
 
     results = []
 
@@ -40,7 +40,7 @@ async def get_today_bills_by_area(area: str):
             "customer_id": str(customer["_id"]),
             "customer_name": customer.get("name", ""),
             "created_at": order.get("created_at"),
-            "remaining_due": float(bill.get("new_due", 0)),   # ✅ per order
+            "remaining_due": float(bill.get("new_due", 0)),
             "bill_amount": float(bill.get("bill_amount", 0)),
             "items": items,
         })

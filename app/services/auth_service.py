@@ -1,10 +1,9 @@
-from datetime import datetime
 from fastapi import HTTPException
 from bson import ObjectId
 from app.database import users_collection
 from app.utils.auth import hash_password, verify_password
 from app.utils.jwt import create_daily_token
-
+from app.utils.time_utils import get_ist_now   # ✅ IST utility
 
 
 async def create_superadmin():
@@ -20,8 +19,8 @@ async def create_superadmin():
         "password_hash": hash_password("superadmin@123"),
         "is_active": True,
         "created_by": "system",
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
+        "created_at": get_ist_now(),   # ✅ IST time
+        "updated_at": get_ist_now()    # ✅ IST time
     })
 
 
@@ -44,6 +43,5 @@ async def login_user(mobile: str, password: str):
         "role": user["role"],
         "expires_at": "12:00 AM",
         "token_type": "bearer",
-        "access_token": token, 
-        
+        "access_token": token,
     }

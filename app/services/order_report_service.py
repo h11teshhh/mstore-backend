@@ -1,10 +1,15 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from bson import ObjectId
 from app.database import bills_collection
+from app.utils.time_utils import get_ist_now  # ✅ IST time utility
 
 
 async def get_today_orders_for_customer(customer_id: str):
-    start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    # ✅ Get IST current time
+    now = get_ist_now()
+
+    # ✅ IST start & end of day
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=1)
 
     pipeline = [
@@ -51,7 +56,7 @@ async def get_today_orders_for_customer(customer_id: str):
             "bill_amount": o["bill_amount"],
             "items": [
                 {
-                    "item_id": str(i["item_id"]),   # ✅ FIX HERE
+                    "item_id": str(i["item_id"]),
                     "item_name": i["item_name"],
                     "quantity": i["quantity"],
                     "price": i["price"],

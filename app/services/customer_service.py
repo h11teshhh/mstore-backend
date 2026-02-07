@@ -1,10 +1,8 @@
-from datetime import datetime
 from bson import ObjectId
 from fastapi import HTTPException
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from app.database import customers_collection
-
-
+from app.utils.time_utils import get_ist_now  # ✅ IST time utility
 
 
 async def create_customer(data: dict, current_user_id: str):
@@ -16,15 +14,14 @@ async def create_customer(data: dict, current_user_id: str):
         "current_due": 0,
         "is_active": True,
         "created_by": ObjectId(current_user_id),
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
+        "created_at": get_ist_now(),   # ✅ IST
+        "updated_at": get_ist_now()    # ✅ IST
     }
 
     try:
         result = await customers_collection.insert_one(customer)
 
     except DuplicateKeyError as e:
-        # This ONLY triggers if unique index on mobile is violated
         print("❌ DuplicateKeyError:", e)
         raise HTTPException(
             status_code=400,
@@ -32,7 +29,6 @@ async def create_customer(data: dict, current_user_id: str):
         )
 
     except PyMongoError as e:
-        # Any other MongoDB error (WRITE ERROR, SCHEMA ERROR, ETC.)
         print("❌ PyMongoError:", e)
         raise HTTPException(
             status_code=500,
@@ -40,7 +36,6 @@ async def create_customer(data: dict, current_user_id: str):
         )
 
     except Exception as e:
-        # Absolutely anything else (coding error, type error, etc.)
         print("❌ Unknown Exception:", e)
         raise HTTPException(
             status_code=500,
@@ -48,22 +43,26 @@ async def create_customer(data: dict, current_user_id: str):
         )
 
     return {
-    "id": str(result.inserted_id),
-    "role": "customer",
-    "name": customer["name"],
-    "mobile": customer["mobile"],
-    "area": customer["area"],
-    "current_due": customer["current_due"],
-    "is_active": customer["is_active"],
-    "created_at": customer["created_at"],
-    "updated_at": customer["updated_at"],
-}
+        "id": str(result.inserted_id),
+        "role": "customer",
+        "name": customer["name"],
+        "mobile": customer["mobile"],
+        "area": customer["area"],
+        "current_due": customer["current_due"],
+        "is_active": customer["is_active"],
+        "created_at": customer["created_at"],
+        "updated_at": customer["updated_at"],
+    }
 
 
 async def get_all_customers():
     customers = []
     async for c in customers_collection.find({"is_active": True}):
-        updated_at = c.get("updated_at") or c.get("created_at") or datetime.utcnow()
+        updated_at = (
+            c.get("updated_at")
+            or c.get("created_at")
+            or get_ist_now()   # ✅ fallback IST
+        )
 
         customers.append({
             "id": str(c["_id"]),
@@ -81,7 +80,7 @@ async def get_all_customers():
 
 async def update_customer(customer_id: str, data: dict):
     update_data = {k: v for k, v in data.items() if v is not None}
-    update_data["updated_at"] = datetime.utcnow()
+    update_data["updated_at"] = get_ist_now()  # ✅ IST
 
     result = await customers_collection.update_one(
         {"_id": ObjectId(customer_id)},
@@ -92,6 +91,7 @@ async def update_customer(customer_id: str, data: dict):
         raise HTTPException(404, "Customer not found")
 
     return {"message": "Customer updated successfully"}
+
 
 async def get_customer_by_id(customer_id: str):
     try:
@@ -108,6 +108,6 @@ async def get_customer_by_id(customer_id: str):
     del customer["_id"]
 
     if "updated_at" not in customer or customer["updated_at"] is None:
-        customer["updated_at"] = customer.get("created_at", datetime.utcnow())
+        customer["updated_at"] = customer.get("created_at", get_ist_now())
 
     return customer

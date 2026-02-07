@@ -1,4 +1,3 @@
-from datetime import datetime
 from bson import ObjectId
 from fastapi import HTTPException
 
@@ -11,6 +10,7 @@ from app.database import (
     client,
 )
 from app.services.inventory_stock_service import get_current_stock
+from app.utils.time_utils import get_ist_now  # ✅ IST time utility
 
 
 # -------------------------
@@ -47,6 +47,9 @@ async def create_order(data: dict, current_user: dict):
     async with await client.start_session() as session:
         async with session.start_transaction():
 
+            # ✅ Single consistent IST timestamp
+            now = get_ist_now()
+
             # 1️⃣ Validate customer
             try:
                 customer_id = ObjectId(data["customer_id"])
@@ -74,7 +77,10 @@ async def create_order(data: dict, current_user: dict):
                 quantity = int(item["quantity"])
 
                 if quantity <= 0:
-                    raise HTTPException(status_code=400, detail="Quantity must be greater than zero")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Quantity must be greater than zero"
+                    )
 
                 inventory_item = await inventory_collection.find_one(
                     {"_id": item_id, "is_active": True},
@@ -82,7 +88,10 @@ async def create_order(data: dict, current_user: dict):
                 )
 
                 if not inventory_item:
-                    raise HTTPException(status_code=404, detail="Inventory item not found")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Inventory item not found"
+                    )
 
                 current_stock = await get_current_stock(str(item_id))
 
@@ -111,8 +120,8 @@ async def create_order(data: dict, current_user: dict):
                 "status": "CREATED",
                 "created_by": ObjectId(current_user["id"]),
                 "created_by_role": current_user["role"],
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
+                "created_at": now,
+                "updated_at": now
             }
 
             result = await orders_collection.insert_one(order_doc, session=session)
@@ -126,7 +135,8 @@ async def create_order(data: dict, current_user: dict):
                         "quantity": item["quantity"],
                         "movement_type": "OUT",
                         "created_by": ObjectId(current_user["id"]),
-                        "created_at": datetime.utcnow()
+                        "created_at": now,
+                        "updated_at": now
                     },
                     session=session
                 )
@@ -138,8 +148,8 @@ async def create_order(data: dict, current_user: dict):
                     "customer_id": customer["_id"],
                     "items": items_snapshot,
                     "bill_amount": total_amount,
-                    "new_due": total_amount,  # ✅ per order only
-                    "created_at": datetime.utcnow()
+                    "new_due": total_amount,
+                    "created_at": now
                 },
                 session=session
             )
@@ -149,7 +159,7 @@ async def create_order(data: dict, current_user: dict):
                 {"_id": customer["_id"]},
                 {
                     "$inc": {"current_due": total_amount},
-                    "$set": {"updated_at": datetime.utcnow()}
+                    "$set": {"updated_at": now}
                 },
                 session=session
             )

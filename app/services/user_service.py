@@ -1,7 +1,7 @@
-from datetime import datetime
 from fastapi import HTTPException
 from app.database import users_collection
 from app.utils.auth import hash_password
+from app.utils.time_utils import get_ist_today_range  # ✅ IST utility
 
 
 async def create_user(data: dict, current_user: dict):
@@ -16,6 +16,8 @@ async def create_user(data: dict, current_user: dict):
     if existing:
         raise HTTPException(400, "User already exists")
 
+    now = get_ist_today_range()  # ✅ IST timestamp
+
     result = await users_collection.insert_one({
         "name": data["name"],
         "mobile": data["mobile"],
@@ -23,9 +25,9 @@ async def create_user(data: dict, current_user: dict):
         "role": data["role"],  # ✅ use requested role
         "password_hash": hash_password(data["password"]),
         "is_active": True,
-        "created_by": current_user["id"],  # ✅ correct key
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
+        "created_by": current_user["id"],  # unchanged
+        "created_at": now,  # ✅ IST
+        "updated_at": now   # ✅ IST
     })
 
     return {

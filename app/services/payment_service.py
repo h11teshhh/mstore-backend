@@ -1,4 +1,3 @@
-from datetime import datetime
 from bson import ObjectId
 from fastapi import HTTPException
 
@@ -9,14 +8,13 @@ from app.database import (
     bills_collection,
     client,
 )
+
+from app.utils.time_utils import get_ist_now  # ✅ IST time utility
+
+
 # -------------------------------------------------
 # GET PAYMENTS BY CUSTOMER (SERIALIZATION SAFE)
 # -------------------------------------------------
-from bson import ObjectId
-from fastapi import HTTPException
-from app.database import payments_collection
-
-
 async def get_payments_by_customer(customer_id: str):
     try:
         customer_obj_id = ObjectId(customer_id)
@@ -58,11 +56,14 @@ async def get_payments_by_customer(customer_id: str):
 
     return payments
 
+
 # -------------------------------------------------
 # CUSTOMER PAYMENT (FIFO – SINGLE SOURCE OF TRUTH)
 # -------------------------------------------------
 async def customer_payment(customer_id: str, amount: float, current_user: dict):
-    if amount <= 0:
+
+    # ✅ Allow 0 payment (only block negative)
+    if amount < 0:
         raise HTTPException(status_code=400, detail="Invalid payment amount")
 
     try:
@@ -71,7 +72,8 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid ID format")
 
-    now = datetime.utcnow()
+    # ✅ IST timestamp
+    now = get_ist_now()
 
     async with await client.start_session() as session:
         async with session.start_transaction():
@@ -137,7 +139,7 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                         "customer_id": customer_obj_id,
                         "amount": pay_amount,
                         "payment_type": "CUSTOMER_PAYMENT",
-                        "payment_method": "CASH",  # default, extend later
+                        "payment_method": "CASH",
                         "received_by": {
                             "id": user_obj_id,
                             "role": current_user.get("role"),
@@ -178,6 +180,16 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                     "paid": pay_amount,
                     "status": payment_status,
                 })
+
+            # ✅ If amount == 0, allow silent no-op
+            if amount == 0:
+                return {
+                    "message": "Zero payment recorded",
+                    "entered_amount": 0,
+                    "accepted_amount": 0,
+                    "remaining_due": current_due,
+                    "bills_settled": [],
+                }
 
             if total_paid <= 0:
                 raise HTTPException(

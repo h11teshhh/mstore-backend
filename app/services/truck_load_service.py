@@ -1,10 +1,10 @@
-from datetime import datetime, timedelta
 from app.database import bills_collection, inventory_collection
+from app.utils.time_utils import get_ist_today_range  # ✅ IST utility
 
 
 async def get_today_truck_load():
-    start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
+    # ✅ Get IST day start and end
+    start, end = get_ist_today_range()
 
     pipeline = [
         {"$match": {"created_at": {"$gte": start, "$lt": end}}},
@@ -27,6 +27,6 @@ async def get_today_truck_load():
         })
 
     return {
-        "date": start.date().isoformat(),
+        "date": start.date().isoformat(),  # ✅ IST date
         "items": result
     }

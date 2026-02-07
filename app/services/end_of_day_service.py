@@ -1,14 +1,17 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from app.database import (
     bills_collection,
     payments_collection,
     inventory_collection,
     customers_collection
 )
+from app.utils.time_utils import get_ist_now  # ✅ IST utility
 
 
 async def end_of_day_summary():
-    start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    # ✅ IST start and end of day
+    now_ist = get_ist_now()
+    start = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=1)
 
     # -------------------------------------------------
@@ -83,16 +86,15 @@ async def end_of_day_summary():
     # FINAL RESPONSE
     # -------------------------------------------------
     return {
-    "date": start.date().isoformat(),
+        "date": start.date().isoformat(),
 
-    # 📦 Stock movement
-    "stock_sold": stock_sold,
+        # 📦 Stock movement
+        "stock_sold": stock_sold,
 
-    # 💰 Cash handling
-    "cash_received_today": total_cash,
-    "delivery_cash_expected": total_cash,
+        # 💰 Cash handling
+        "cash_received_today": total_cash,
+        "delivery_cash_expected": total_cash,
 
-    # 👥 Customer ledger
-    "customers": customer_ledger
-}
-
+        # 👥 Customer ledger
+        "customers": customer_ledger
+    }
