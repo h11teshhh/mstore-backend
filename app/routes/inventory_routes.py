@@ -12,7 +12,7 @@ async def add_inventory(
     item: InventoryCreate,
     current_user=Depends(require_roles("SUPERADMIN"))
 ):
-    return await create_inventory_item(item.dict())
+    return await create_inventory_item(item.dict(), current_user)
 
 
 @router.get("/stock")

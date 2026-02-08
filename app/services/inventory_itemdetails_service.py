@@ -5,10 +5,8 @@ from fastapi import HTTPException
 from app.database import inventory_itemdetails_collection
 from app.services.inventory_stock_service import get_current_stock
 
-SYSTEM_USER_ID = ObjectId("696f3a0797dacdd4c345551b")
 
-
-async def add_inventory_movement(data: dict):
+async def add_inventory_movement(data: dict, current_user: dict):
     item_id = data["item_id"]
     quantity = data["quantity"]
     movement_type = data["movement_type"]
@@ -22,11 +20,13 @@ async def add_inventory_movement(data: dict):
                 detail=f"Insufficient stock. Available: {current_stock}"
             )
 
+    user_obj_id = ObjectId(current_user["id"])
+
     entry = {
         "item_id": ObjectId(item_id),
         "quantity": quantity,
         "movement_type": movement_type,
-        "created_by": SYSTEM_USER_ID,
+        "created_by": user_obj_id,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
@@ -38,7 +38,7 @@ async def add_inventory_movement(data: dict):
         "item_id": item_id,
         "quantity": quantity,
         "movement_type": movement_type,
-        "created_by": str(SYSTEM_USER_ID),
+        "created_by": str(user_obj_id),
         "created_at": entry["created_at"],
         "updated_at": entry["updated_at"]
     }

@@ -61,8 +61,12 @@ async def get_payments_by_customer(customer_id: str):
 # -------------------------------------------------
 # CUSTOMER PAYMENT (FIFO – SINGLE SOURCE OF TRUTH)
 # -------------------------------------------------
+# -------------------------------------------------
+# CUSTOMER PAYMENT (FIFO – SINGLE SOURCE OF TRUTH)
+# -------------------------------------------------
 async def customer_payment(customer_id: str, amount: float, current_user: dict):
-    if amount <= 0:
+
+    if amount < 0:
         raise HTTPException(status_code=400, detail="Invalid payment amount")
 
     try:
@@ -97,6 +101,16 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                     status_code=400,
                     detail=f"Entered amount ₹{amount} exceeds pending due ₹{current_due}"
                 )
+
+            # ✅ If amount is 0 → just return success (no updates)
+            if amount == 0:
+                return {
+                    "message": "Zero payment recorded successfully",
+                    "entered_amount": 0,
+                    "accepted_amount": 0,
+                    "remaining_due": current_due,
+                    "bills_settled": [],
+                }
 
             remaining_amount = float(amount)
             total_paid = 0.0
@@ -137,7 +151,7 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                         "customer_id": customer_obj_id,
                         "amount": pay_amount,
                         "payment_type": "CUSTOMER_PAYMENT",
-                        "payment_method": "CASH",  # default, extend later
+                        "payment_method": "CASH",
                         "received_by": {
                             "id": user_obj_id,
                             "role": current_user.get("role"),
@@ -157,7 +171,7 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                     session=session
                 )
 
-                # 5️⃣ Close order if bill fully settled
+                # 5️⃣ Close order if fully paid
                 if new_bill_due == 0 and bill.get("order_id"):
                     await orders_collection.update_one(
                         {"_id": bill["order_id"]},
@@ -179,13 +193,7 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                     "status": payment_status,
                 })
 
-            if total_paid <= 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No unpaid bills found for customer"
-                )
-
-            # 6️⃣ Update customer running due (ONCE)
+            # 6️⃣ Update customer running due
             await customers_collection.update_one(
                 {"_id": customer_obj_id},
                 {

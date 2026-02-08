@@ -4,15 +4,13 @@ from fastapi import HTTPException
 
 from app.database import inventory_collection
 
-SYSTEM_USER_ID = ObjectId("696f3a0797dacdd4c345551b")
 
-
-async def create_inventory_item(data: dict):
+async def create_inventory_item(data: dict, current_user: dict):
     item = {
         "item_name": data["item_name"],
         "price": data["price"],
         "is_active": True,
-        "created_by": SYSTEM_USER_ID,
+        "created_by": ObjectId(current_user["id"]),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
