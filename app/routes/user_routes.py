@@ -48,3 +48,19 @@ async def delete_user(user_id: str):
         raise HTTPException(status_code=400, detail="Failed to delete user or already inactive")
     
     return {"message": "User deleted successfully (deactivated)", "user_id": user_id}
+
+
+# GET all active users - SUPERADMIN only (for Manage Users screen)
+@router.get("/", dependencies=[Depends(require_roles("SUPERADMIN"))])
+async def list_all_users():
+    users = []
+    async for u in users_collection.find({"is_active": True}):
+        users.append({
+            "id": str(u["_id"]),
+            "name": u.get("name"),
+            "mobile": u.get("mobile"),
+            "role": u.get("role"),
+            "address": u.get("address", ""),
+            "is_active": u.get("is_active", True),
+        })
+    return users
