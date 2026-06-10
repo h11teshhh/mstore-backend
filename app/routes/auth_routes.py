@@ -183,15 +183,10 @@ async def forgot_password_initiate(data: ForgotPasswordInitiate):
             detail="Invalid mobile number. User not found or inactive."
         )
     
-    # Validate email matches (mobile/email mismatch check)
-    user_email = user.get("email", "").lower().strip()
+    # Email is not stored in DB — master password already verified admin identity.
+    # OTP is sent to whichever email the user provides in Step 2.
     provided_email = data.email.lower().strip()
-    if not user_email or user_email != provided_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Mobile/email mismatch or email not registered for this account."
-        )
-    
+
     # Generate secure OTP
     otp = generate_otp()
     expiry = datetime.utcnow() + timedelta(minutes=10)
