@@ -10,3 +10,9 @@ if not MONGO_URL or not DB_NAME:
 
 SECRET_KEY = "Ugw3gcbSKSUopK8OuWlG9Vqrr86y2rlVmvxzVC-rnd4"
 ALGORITHM = "HS256"
+
+# Email configuration for Forgot Password OTP
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASS = os.getenv("EMAIL_PASS")
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
