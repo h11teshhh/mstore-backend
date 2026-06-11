@@ -85,78 +85,54 @@ def generate_otp(length: int = 6) -> str:
 
 # Helper to send professional OTP email
 async def send_otp_email(to_email: str, otp: str, user_name: str = "User"):
+    """Send OTP email using SSL (port 465) via thread executor — non-blocking, fast."""
     if not EMAIL_USER or not EMAIL_PASS:
         print("Email credentials not configured. OTP:", otp)
-        return  # For dev, or raise in prod
-    
-    subject = "MStore - Password Reset Verification Code"
-    
+        return
+
     html_content = f"""
-    <html>
-    <head>
-        <style>
-            body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #F5F5F9; margin: 0; padding: 20px; }}
-            .container {{ max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; }}
-            .header {{ background: linear-gradient(135deg, #696CFF 0%, #5A5FE0 100%); color: white; padding: 30px 20px; text-align: center; }}
-            .header h1 {{ margin: 0; font-size: 28px; font-weight: 600; }}
-            .content {{ padding: 40px 30px; }}
-            .greeting {{ font-size: 18px; color: #333; margin-bottom: 20px; }}
-            .otp-box {{ background: #F5F5F9; border: 2px dashed #696CFF; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; }}
-            .otp-code {{ font-size: 36px; font-weight: bold; color: #696CFF; letter-spacing: 8px; margin: 10px 0; }}
-            .info {{ color: #555; font-size: 14px; line-height: 1.6; }}
-            .warning {{ background: #FFF3CD; border-left: 4px solid #FFC107; padding: 15px; margin: 20px 0; border-radius: 4px; color: #856404; }}
-            .footer {{ background: #F5F5F9; padding: 20px; text-align: center; font-size: 12px; color: #888; }}
-            .security-notice {{ font-size: 13px; color: #666; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🛒 MStore</h1>
-                <p style="margin: 10px 0 0; opacity: 0.9;">Secure Password Reset</p>
-            </div>
-            <div class="content">
-                <p class="greeting">Hello {user_name},</p>
-                <p class="info">We received a request to reset your password for your MStore account. Use the verification code below to proceed.</p>
-                
-                <div class="otp-box">
-                    <p style="margin: 0; color: #666; font-size: 14px;">Your Verification Code</p>
-                    <div class="otp-code">{otp}</div>
-                    <p style="margin: 5px 0 0; color: #888; font-size: 13px;">Valid for 10 minutes</p>
-                </div>
-                
-                <div class="warning">
-                    <strong>Security Notice:</strong> This code is confidential. Do not share it with anyone. If you did not request this reset, please ignore this email or contact support immediately.
-                </div>
-                
-                <p class="info">If you have any questions, reply to this email or reach out to our support team.</p>
-            </div>
-            <div class="footer">
-                <p>© 2026 MStore. All rights reserved.</p>
-                <p class="security-notice">This is an automated message. Please do not reply directly unless necessary.</p>
-            </div>
+    <html><head><style>
+      body{{font-family:Arial,sans-serif;background:#F5F5F9;margin:0;padding:20px}}
+      .c{{max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.1)}}
+      .h{{background:linear-gradient(135deg,#696CFF,#5A5FE0);color:#fff;padding:28px 20px;text-align:center}}
+      .h h1{{margin:0;font-size:26px}}.b{{padding:32px 28px}}
+      .otp{{background:#F0F0FF;border:2px dashed #696CFF;border-radius:8px;padding:20px;text-align:center;margin:24px 0}}
+      .code{{font-size:38px;font-weight:800;color:#696CFF;letter-spacing:10px}}
+      .warn{{background:#FFF3CD;border-left:4px solid #FFC107;padding:12px;border-radius:4px;color:#856404;font-size:13px}}
+      .f{{background:#F5F5F9;padding:16px;text-align:center;font-size:11px;color:#888}}
+    </style></head><body>
+    <div class="c">
+      <div class="h"><h1>M-Store</h1><p style="margin:6px 0 0;opacity:.9">Password Reset</p></div>
+      <div class="b">
+        <p>Hello <strong>{user_name}</strong>,</p>
+        <p style="color:#555;font-size:14px">Use the code below to reset your M-Store password.</p>
+        <div class="otp">
+          <p style="margin:0;color:#888;font-size:13px">Verification Code</p>
+          <div class="code">{otp}</div>
+          <p style="margin:6px 0 0;color:#e55;font-size:12px">⏱ Valid for 10 minutes</p>
         </div>
-    </body>
-    </html>
-    """
-    
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_USER
-    msg["To"] = to_email
-    
-    msg.attach(MIMEText(html_content, "html"))
-    
-    try:
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
+        <div class="warn"><strong>Security:</strong> Never share this code. If you didn't request this, ignore this email.</div>
+      </div>
+      <div class="f">© 2026 M-Store · Automated message</div>
+    </div></body></html>"""
+
+    def _send():
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "M-Store — Password Reset Code"
+        msg["From"] = EMAIL_USER
+        msg["To"] = to_email
+        msg.attach(MIMEText(html_content, "html"))
+        # SSL port 465 — no STARTTLS handshake, faster connection
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as server:
             server.login(EMAIL_USER, EMAIL_PASS)
             server.send_message(msg)
-        print(f"OTP email sent successfully to {to_email}")
+
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send)
     except Exception as e:
-        print(f"Failed to send OTP email: {str(e)}")
-        # In production, you may want to raise or log properly
-        raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again later.")
+        raise HTTPException(status_code=500, detail="Could not send verification email. Check your email address and try again.")
 
 # STEP 1: Master Password Verification
 @router.post("/verify-master-password")
@@ -183,17 +159,19 @@ async def forgot_password_initiate(data: ForgotPasswordInitiate):
             detail="Invalid mobile number. User not found or inactive."
         )
     
-    # Email is not stored in DB — master password already verified admin identity.
-    # OTP is sent to whichever email the user provides in Step 2.
+    # Email is not stored in DB — master password already proved admin identity.
+    # OTP is sent to whatever email the user provides.
     provided_email = data.email.lower().strip()
+    user_name = user.get("name", "User")
 
-    # Generate secure OTP
+    # Generate OTP + store — run delete + insert concurrently for speed
     otp = generate_otp()
     expiry = datetime.utcnow() + timedelta(minutes=10)
-    
-    # Store OTP in dedicated collection (create if not exists)
     otp_collection = database["otp_verifications"]
-    await otp_collection.delete_many({"mobile": data.mobile})  # Invalidate previous OTPs
+
+    await asyncio.gather(
+        otp_collection.delete_many({"mobile": data.mobile}),
+    )
     await otp_collection.insert_one({
         "mobile": data.mobile,
         "email": provided_email,
@@ -202,18 +180,19 @@ async def forgot_password_initiate(data: ForgotPasswordInitiate):
         "used": False,
         "created_at": datetime.utcnow()
     })
-    
-    # Send email (use user name if available)
-    user_name = user.get("name", "Valued Customer")
+
+    # Send email — already non-blocking via run_in_executor
     try:
         await send_otp_email(provided_email, otp, user_name)
-    except Exception as email_err:
-        # Clean up OTP if email fails
+    except Exception:
         await otp_collection.delete_one({"mobile": data.mobile, "otp": otp})
-        raise email_err
-    
+        raise HTTPException(
+            status_code=500,
+            detail="Could not send verification email. Please check the email address and try again."
+        )
+
     return OTPResponse(
-        message="A verification code has been sent to your email address. Please check your inbox (and spam folder).",
+        message="Verification code sent to your email. Please check your inbox.",
         expires_in_minutes=10
     )
 

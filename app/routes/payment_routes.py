@@ -1,10 +1,11 @@
 # app/routes/payment_routes.py
 
 from fastapi import APIRouter, Depends, Query
-from app.schemas.payment import CustomerPaymentRequest
+from app.schemas.payment import CustomerPaymentRequest, DirectPaymentRequest
 from app.services.payment_service import (
     customer_payment,
     get_payments_by_customer,
+    direct_customer_payment,
 )
 from app.dependencies.roles import require_roles
 
@@ -35,3 +36,19 @@ async def payments_by_customer(
     current_user=Depends(require_roles("SUPERADMIN", "ADMIN", "DELIVERY")),
 ):
     return await get_payments_by_customer(customer_id)
+
+
+# -------------------------------------------------
+# DIRECT PAYMENT — no order/bill required
+# -------------------------------------------------
+@router.post("/direct")
+async def direct_payment_route(
+    data: DirectPaymentRequest,
+    current_user=Depends(require_roles("SUPERADMIN", "ADMIN", "DELIVERY")),
+):
+    return await direct_customer_payment(
+        customer_id=data.customer_id,
+        amount=data.amount,
+        note=data.note or "",
+        current_user=current_user,
+    )

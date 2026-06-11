@@ -210,3 +210,63 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
                 "remaining_due": max(current_due - total_paid, 0),
                 "bills_settled": bills_settled,
             }
+
+
+# -------------------------------------------------
+# DIRECT PAYMENT — works with no orders/bills
+# Records payment and updates customer due
+# -------------------------------------------------
+async def direct_customer_payment(customer_id: str, amount: float, note: str, current_user: dict):
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    try:
+        customer_obj_id = ObjectId(customer_id)
+        user_obj_id = ObjectId(current_user["id"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+
+    now = datetime.utcnow()
+
+    async with await client.start_session() as session:
+        async with session.start_transaction():
+            customer = await customers_collection.find_one(
+                {"_id": customer_obj_id}, session=session
+            )
+            if not customer:
+                raise HTTPException(status_code=404, detail="Customer not found")
+
+            current_due = float(customer.get("current_due", 0))
+
+            # Record payment directly (no bill required)
+            await payments_collection.insert_one({
+                "order_id": None,
+                "customer_id": customer_obj_id,
+                "amount": amount,
+                "note": note or "",
+                "payment_type": "DIRECT_PAYMENT",
+                "payment_method": "CASH",
+                "received_by": {
+                    "id": user_obj_id,
+                    "role": current_user.get("role"),
+                    "name": current_user.get("name"),
+                },
+                "payment_status": "COMPLETE",
+                "created_by": user_obj_id,
+                "created_at": now,
+            }, session=session)
+
+            # Reduce due (floor at 0)
+            new_due = max(current_due - amount, 0)
+            await customers_collection.update_one(
+                {"_id": customer_obj_id},
+                {"$set": {"current_due": new_due, "updated_at": now}},
+                session=session
+            )
+
+            return {
+                "message": "Payment recorded successfully",
+                "amount_paid": amount,
+                "previous_due": current_due,
+                "new_due": new_due,
+            }

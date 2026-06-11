@@ -16,3 +16,9 @@ class PartialPaymentRequest(BaseModel):
 class CustomerPaymentRequest(BaseModel):
     customer_id: str
     amount: float
+
+
+class DirectPaymentRequest(BaseModel):
+    customer_id: str
+    amount: float
+    note: Optional[str] = None
