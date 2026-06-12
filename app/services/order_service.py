@@ -22,19 +22,44 @@ async def get_orders_by_customer(customer_id: str):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid customer_id")
 
-    cursor = orders_collection.find({"customer_id": customer_obj_id})
+    # Sort newest first so UI shows latest orders at top
+    cursor = orders_collection.find(
+        {"customer_id": customer_obj_id}
+    ).sort("created_at", -1)
 
     orders = []
     async for order in cursor:
+        order_id = order["_id"]
+        bill     = await bills_collection.find_one({"order_id": order_id})
+
+        bill_amount   = float(order.get("total_amount", 0))
+        remaining_due = float(bill.get("new_due", 0)) if bill else bill_amount
+        order_status  = order.get("status", "CREATED")
+
+        # Derive accurate payment_status from bill.new_due
+        # FIFO payment allocates to oldest bill first:
+        #   new_due == 0          → fully paid (CLOSED)
+        #   new_due < bill_amount → partially paid
+        #   new_due == bill_amount→ unpaid
+        if order_status == "CLOSED" or remaining_due == 0:
+            payment_status = "PAID"
+        elif remaining_due < bill_amount:
+            payment_status = "PARTIAL"
+        else:
+            payment_status = "PENDING"
+
         orders.append({
-            "id": str(order["_id"]),
-            "customer_id": str(order["customer_id"]),
-            "total_amount": order.get("total_amount", 0),
-            "status": order.get("status", "CREATED"),
-            "created_by": str(order.get("created_by")),
-            "created_by_role": order.get("created_by_role"),
-            "created_at": order.get("created_at"),
-            "updated_at": order.get("updated_at"),
+            "id":             str(order_id),
+            "customer_id":    str(order["customer_id"]),
+            "total_amount":   bill_amount,
+            "bill_amount":    bill_amount,
+            "remaining_due":  remaining_due,
+            "payment_status": payment_status,
+            "status":         order_status,
+            "created_by":     str(order.get("created_by")),
+            "created_by_role":order.get("created_by_role"),
+            "created_at":     order.get("created_at"),
+            "updated_at":     order.get("updated_at"),
         })
 
     return orders

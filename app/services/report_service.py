@@ -1,15 +1,16 @@
-from datetime import datetime, timedelta
-from bson import ObjectId
 from app.database import orders_collection, customers_collection, bills_collection
+from app.utils.ist_time import today_ist_utc_range, today_ist_date_str
 
 
 async def get_today_bills_by_area(area: str):
-    start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    end   = start + timedelta(days=1)
+    """
+    Returns today's bills filtered by IST calendar date.
+    'Today' means 00:00 IST → 23:59 IST of the current IST day.
+    """
+    start, end = today_ist_utc_range()
 
     results = []
-
-    cursor = orders_collection.find({
+    cursor  = orders_collection.find({
         "created_at": {"$gte": start, "$lt": end}
     })
 
@@ -34,11 +35,10 @@ async def get_today_bills_by_area(area: str):
                 "total":     float(item.get("total", 0)),
             })
 
-        new_due    = float(bill.get("new_due", 0))
-        bill_amt   = float(bill.get("bill_amount", 0))
+        new_due      = float(bill.get("new_due", 0))
+        bill_amt     = float(bill.get("bill_amount", 0))
         order_status = order.get("status", "CREATED")
 
-        # Derive payment_status from bill's new_due and order status
         if order_status == "CLOSED" or new_due == 0:
             payment_status = "PAID"
         elif new_due < bill_amt:
@@ -53,13 +53,13 @@ async def get_today_bills_by_area(area: str):
             "created_at":     order.get("created_at"),
             "remaining_due":  new_due,
             "bill_amount":    bill_amt,
-            "payment_status": payment_status,       # ← NEW
-            "order_status":   order_status,          # ← NEW (raw order status)
+            "payment_status": payment_status,
+            "order_status":   order_status,
             "items":          items,
         })
 
     return {
-        "date":         start.date().isoformat(),
+        "date":         today_ist_date_str(),
         "area":         area,
         "total_orders": len(results),
         "orders":       results,

@@ -1,10 +1,21 @@
 # app/routes/auth_routes.py
+#
+# EMAIL DELIVERY STRATEGY (in order of preference):
+#   1. Gmail SMTP port 587 (STARTTLS) — works if Render allows outbound 587
+#   2. Brevo (Sendinblue) HTTP API  — works on ALL networks (HTTPS port 443)
+#      Free tier: 300 emails/day, no credit card required
+#      Set BREVO_API_KEY env var on Render to enable
+#   3. Console fallback             — OTP printed to Render logs for admin use
 
 import asyncio
+import json
 import os
 import random
 import smtplib
+import ssl
 import string
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -12,6 +23,7 @@ from email.mime.text import MIMEText
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
+# ── Internal imports ──────────────────────────────────────────────────────────
 try:
     from app.services.auth_service import login_user
 except ImportError:
@@ -35,23 +47,28 @@ try:
 except ImportError:
     def hash_password(p): return p
 
-# Read email creds at import time — try config first, fall back to direct env
-EMAIL_USER = None
-EMAIL_PASS = None
+# ── Email credentials (read at import time) ───────────────────────────────────
+EMAIL_USER    = None
+EMAIL_PASS    = None
+BREVO_API_KEY = None
+
 try:
-    from app.config import EMAIL_USER, EMAIL_PASS  # type: ignore
+    from app.config import EMAIL_USER, EMAIL_PASS          # type: ignore
 except Exception:
     pass
+
 if not EMAIL_USER:
     EMAIL_USER = os.getenv("EMAIL_USER") or os.getenv("GMAIL_USER")
 if not EMAIL_PASS:
     EMAIL_PASS = os.getenv("EMAIL_PASS") or os.getenv("GMAIL_PASS")
 
+BREVO_API_KEY = os.getenv("BREVO_API_KEY") or os.getenv("SENDINBLUE_API_KEY")
+
 MASTER_PASSWORD = "ONLYSUPERADMIN.A"
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-# ── Models ────────────────────────────────────────────────────────────────────
+# ── Pydantic models ───────────────────────────────────────────────────────────
 
 class MasterPasswordVerify(BaseModel):
     master_password: str = Field(..., min_length=1)
@@ -71,11 +88,7 @@ class OTPResponse(BaseModel):
     expires_in_minutes: int = 10
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _generate_otp(length: int = 6) -> str:
-    return "".join(random.choices(string.digits, k=length))
-
+# ── Email HTML template ───────────────────────────────────────────────────────
 
 def _build_email_html(otp: str, user_name: str) -> str:
     return f"""<!DOCTYPE html>
@@ -100,85 +113,194 @@ def _build_email_html(otp: str, user_name: str) -> str:
   <div class="hdr"><h1>M-Store</h1><p>Password Reset Verification</p></div>
   <div class="body">
     <p style="color:#4A5568">Hello <strong>{user_name}</strong>,</p>
-    <p style="color:#4A5568;font-size:14px">Use the one-time code below to reset your password.</p>
+    <p style="color:#4A5568;font-size:14px">Your one-time password reset code:</p>
     <div class="otp-box">
       <div style="font-size:12px;color:#9AA5B4;text-transform:uppercase;letter-spacing:2px">Verification Code</div>
       <div class="otp-code">{otp}</div>
-      <div class="otp-exp">⏱ Expires in 10 minutes</div>
+      <div class="otp-exp">&#9201; Expires in 10 minutes</div>
     </div>
-    <div class="warn"><strong>Security notice:</strong> Never share this code with anyone.
-      If you did not request this, ignore this email — your account remains secure.</div>
+    <div class="warn"><strong>Security notice:</strong> Never share this code.
+      If you did not request this, ignore this email.</div>
   </div>
-  <div class="footer">© 2026 M-Store · Automated message, do not reply.</div>
+  <div class="footer">&copy; 2026 M-Store &middot; Automated message, do not reply.</div>
 </div></body></html>"""
 
 
-async def _send_otp_email(to_email: str, otp: str, user_name: str = "User") -> None:
+# ── Email sending strategies ──────────────────────────────────────────────────
+
+def _try_gmail_smtp(to_email: str, subject: str, html: str) -> bool:
     """
-    Send OTP via Gmail SMTP SSL (port 465).
-    Uses asyncio.get_running_loop() (correct for Python 3.10+).
-    Falls back to console log when credentials not configured.
+    Attempt Gmail SMTP via port 587 (STARTTLS).
+    Returns True on success, False on network/connection failure.
+    Raises on auth failure (no point retrying with wrong credentials).
     """
     if not EMAIL_USER or not EMAIL_PASS:
-        # Dev/staging: log OTP to console so it's still usable
-        print(f"[OTP-CONSOLE] To={to_email} OTP={otp} (email not configured)")
-        return
-
-    html = _build_email_html(otp, user_name)
-
-    def _smtp_send() -> None:
+        return False
+    try:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = "M-Store — Password Reset Code"
+        msg["Subject"] = subject
         msg["From"]    = EMAIL_USER
         msg["To"]      = to_email
         msg.attach(MIMEText(html, "html"))
-        # Port 465 + SSL_context is the most reliable path for Gmail App Passwords
-        import ssl
         ctx = ssl.create_default_context()
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx, timeout=25) as srv:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as srv:
+            srv.ehlo()
+            srv.starttls(context=ctx)
+            srv.ehlo()
             srv.login(EMAIL_USER, EMAIL_PASS)
             srv.sendmail(EMAIL_USER, to_email, msg.as_string())
+        print(f"[OTP-EMAIL] Sent via Gmail SMTP 587 to {to_email}")
+        return True
+    except smtplib.SMTPAuthenticationError as exc:
+        print(f"[OTP-EMAIL-ERR] Gmail auth failed: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Email authentication failed. Please contact the administrator."
+        )
+    except (OSError, smtplib.SMTPException) as exc:
+        # Network blocked or connection refused — try next method
+        print(f"[OTP-EMAIL-WARN] Gmail SMTP 587 blocked/failed: {type(exc).__name__}: {exc}")
+        return False
+
+
+def _try_gmail_smtp_ssl(to_email: str, subject: str, html: str) -> bool:
+    """
+    Attempt Gmail SMTP via port 465 (SSL). Secondary Gmail attempt.
+    Returns True on success, False on network failure.
+    """
+    if not EMAIL_USER or not EMAIL_PASS:
+        return False
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = EMAIL_USER
+        msg["To"]      = to_email
+        msg.attach(MIMEText(html, "html"))
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx, timeout=20) as srv:
+            srv.login(EMAIL_USER, EMAIL_PASS)
+            srv.sendmail(EMAIL_USER, to_email, msg.as_string())
+        print(f"[OTP-EMAIL] Sent via Gmail SMTP 465 to {to_email}")
+        return True
+    except smtplib.SMTPAuthenticationError as exc:
+        print(f"[OTP-EMAIL-ERR] Gmail SSL auth failed: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Email authentication failed. Please contact the administrator."
+        )
+    except (OSError, smtplib.SMTPException) as exc:
+        print(f"[OTP-EMAIL-WARN] Gmail SMTP 465 blocked/failed: {type(exc).__name__}: {exc}")
+        return False
+
+
+def _try_brevo_api(to_email: str, to_name: str, subject: str, html: str) -> bool:
+    """
+    Send via Brevo (Sendinblue) REST API over HTTPS port 443.
+    Always works on Render — no SMTP ports required.
+    Free tier: 300 emails/day. Get key at: https://app.brevo.com/settings/keys/api
+    Set env var: BREVO_API_KEY=xkeysib-...
+    Returns True on success, False if key not configured.
+    Raises HTTPException on API error.
+    """
+    if not BREVO_API_KEY:
+        print("[OTP-EMAIL-WARN] BREVO_API_KEY not set — skipping Brevo")
+        return False
+
+    sender_name  = "M-Store"
+    sender_email = EMAIL_USER or "nilkanthtraders82@gmail.com"
+
+    payload = json.dumps({
+        "sender":     {"name": sender_name, "email": sender_email},
+        "to":         [{"email": to_email, "name": to_name}],
+        "subject":    subject,
+        "htmlContent": html,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=payload,
+        headers={
+            "accept":       "application/json",
+            "content-type": "application/json",
+            "api-key":      BREVO_API_KEY,
+        },
+        method="POST",
+    )
 
     try:
-        # Use get_running_loop() — correct for Python 3.10+ inside async context
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _smtp_send)
-        print(f"[OTP-EMAIL] Sent to {to_email}")
-    except smtplib.SMTPAuthenticationError as exc:
-        # Authentication error — 99% means wrong App Password or Less Secure App blocked
-        print(f"[OTP-EMAIL-ERR] SMTPAuthenticationError: {exc}")
-        raise HTTPException(
-            status_code=500,
-            detail="Email authentication failed. The administrator needs to check email configuration."
-        )
-    except smtplib.SMTPRecipientsRefused as exc:
-        print(f"[OTP-EMAIL-ERR] Recipient refused: {exc}")
-        raise HTTPException(
-            status_code=400,
-            detail="The email address entered is not valid or does not exist. Please check and try again."
-        )
-    except smtplib.SMTPException as exc:
-        print(f"[OTP-EMAIL-ERR] SMTPException: {exc}")
-        raise HTTPException(
-            status_code=500,
-            detail="Could not send verification email. Please try again in a moment."
-        )
-    except OSError as exc:
-        # Network timeout, DNS failure, connection refused
-        print(f"[OTP-EMAIL-ERR] Network/OS error: {exc}")
-        raise HTTPException(
-            status_code=500,
-            detail="Could not reach email server. Please try again."
-        )
-    except Exception as exc:
-        print(f"[OTP-EMAIL-ERR] Unexpected: {type(exc).__name__}: {exc}")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            resp_body = resp.read().decode("utf-8")
+            print(f"[OTP-EMAIL] Sent via Brevo API to {to_email}: {resp_body}")
+            return True
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        print(f"[OTP-EMAIL-ERR] Brevo HTTP {exc.code}: {body}")
         raise HTTPException(
             status_code=500,
             detail="Could not send verification email. Please try again."
         )
+    except urllib.error.URLError as exc:
+        print(f"[OTP-EMAIL-ERR] Brevo network error: {exc.reason}")
+        return False
 
 
-# ── Step 1: Verify master password ───────────────────────────────────────────
+async def _send_otp_email(to_email: str, otp: str, user_name: str = "User") -> None:
+    """
+    Multi-path OTP email sender.
+    Path 1: Gmail SMTP port 587 (STARTTLS)
+    Path 2: Gmail SMTP port 465 (SSL)
+    Path 3: Brevo HTTP API (always works on Render)
+    Path 4: Console log (dev/admin fallback)
+    """
+    subject = "M-Store — Password Reset Code"
+    html    = _build_email_html(otp, user_name)
+
+    def _send_sync() -> bool:
+        # Try Gmail 587 first
+        if _try_gmail_smtp(to_email, subject, html):
+            return True
+        # Try Gmail 465
+        if _try_gmail_smtp_ssl(to_email, subject, html):
+            return True
+        # Try Brevo HTTP API
+        if _try_brevo_api(to_email, user_name, subject, html):
+            return True
+        # All delivery paths failed — log to console
+        print(f"[OTP-CONSOLE-FALLBACK] ===== OTP for {to_email}: {otp} =====")
+        print("[OTP-CONSOLE-FALLBACK] Set BREVO_API_KEY env var to enable reliable email delivery")
+        return False
+
+    try:
+        loop    = asyncio.get_running_loop()
+        success = await loop.run_in_executor(None, _send_sync)
+        if not success:
+            # Email delivery unavailable but OTP is stored in DB
+            # Raise so user knows to check with admin
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Email service is currently unavailable. "
+                    "Please contact the administrator — the reset code "
+                    "has been generated and can be retrieved from server logs."
+                )
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[OTP-EMAIL-ERR] Unexpected error: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred. Please try again."
+        )
+
+
+# ── OTP generator ─────────────────────────────────────────────────────────────
+
+def _generate_otp(length: int = 6) -> str:
+    return "".join(random.choices(string.digits, k=length))
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("/verify-master-password")
 async def verify_master_password(data: MasterPasswordVerify):
@@ -189,8 +311,6 @@ async def verify_master_password(data: MasterPasswordVerify):
         )
     return {"message": "Master password verified.", "step": 2}
 
-
-# ── Step 2: Identify user & send OTP ─────────────────────────────────────────
 
 @router.post("/forgot-password/initiate", response_model=OTPResponse)
 async def forgot_password_initiate(data: ForgotPasswordInitiate):
@@ -220,7 +340,6 @@ async def forgot_password_initiate(data: ForgotPasswordInitiate):
         "created_at": datetime.utcnow(),
     })
 
-    # Raises HTTPException on failure — OTP is stored so user can retry send
     await _send_otp_email(provided_email, otp, user_name)
 
     return OTPResponse(
@@ -228,8 +347,6 @@ async def forgot_password_initiate(data: ForgotPasswordInitiate):
         expires_in_minutes=10,
     )
 
-
-# ── Step 3: Verify OTP & reset password ──────────────────────────────────────
 
 @router.post("/forgot-password/reset")
 async def forgot_password_reset(data: ForgotPasswordReset):
@@ -270,8 +387,6 @@ async def forgot_password_reset(data: ForgotPasswordReset):
     )
     return {"message": "Password changed successfully.", "success": True}
 
-
-# ── Login ─────────────────────────────────────────────────────────────────────
 
 @router.post("/login")
 async def login(credentials: UserLogin):
