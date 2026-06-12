@@ -219,6 +219,20 @@ async def customer_payment(customer_id: str, amount: float, current_user: dict):
 async def direct_customer_payment(customer_id: str, amount: float, note: str, current_user: dict):
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+    # Validate against due BEFORE starting transaction
+    try:
+        coid = ObjectId(customer_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid customer ID")
+    pre_check = await customers_collection.find_one({"_id": coid})
+    if not pre_check:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    current_due_check = float(pre_check.get("current_due", 0))
+    if amount > current_due_check:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Payment ₹{amount:.0f} exceeds outstanding due ₹{current_due_check:.0f}"
+        )
 
     try:
         customer_obj_id = ObjectId(customer_id)
