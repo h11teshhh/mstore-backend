@@ -1,8 +1,14 @@
 # app/routes/auth_routes.py
 #
-# EMAIL DELIVERY — Brevo HTTP API first (always works on Render, port 443)
-# Falls back to Gmail SMTP (may be blocked), then console log.
-# Brevo requires sender email/domain to be verified in Brevo dashboard.
+# EMAIL DELIVERY — Three-path strategy:
+#   1. Brevo HTTP API (HTTPS 443 — always works on Render)
+#   2. Gmail SMTP SSL port 465 (sometimes works on Render)
+#   3. Gmail SMTP STARTTLS port 587 (often blocked on Render free tier)
+#   4. Console fallback (OTP printed to Render logs)
+#
+# To make email work on Render, set BREVO_API_KEY in Environment Variables.
+# Get a free key at https://app.brevo.com → SMTP & API → API Keys
+# Then verify your sender email under Senders & Domains.
 
 import asyncio
 import json
@@ -134,32 +140,28 @@ def _build_email_html(otp: str, user_name: str) -> str:
 </div></body></html>"""
 
 
-# ── Email sending functions (all synchronous — run in executor) ───────────────
+# ── Internal exception ────────────────────────────────────────────────────────
 
 class _EmailError(Exception):
-    """Raised when email fails with a user-facing message."""
+    """Raised when email delivery fails — carries a safe user-facing message."""
     def __init__(self, detail: str, status_code: int = 500):
         self.detail      = detail
         self.status_code = status_code
         super().__init__(detail)
 
 
-def _send_via_brevo(
-    to_email: str, to_name: str, subject: str, html: str
-) -> None:
-    """
-    Send via Brevo REST API (HTTPS port 443 — works on ALL networks).
-    Raises _EmailError on failure.
+# ── Delivery path 1: Brevo REST API (HTTPS 443) ───────────────────────────────
 
-    IMPORTANT: The sender email (EMAIL_USER) must be verified in the Brevo
-    dashboard under Senders & Domains, otherwise Brevo returns 400.
+def _send_via_brevo(to_email: str, to_name: str, subject: str, html: str) -> None:
+    """
+    Send via Brevo REST API (HTTPS port 443 — works on ALL hosting platforms).
+    The sender email (EMAIL_USER) must be verified in Brevo dashboard:
+      Senders & Domains → Add a sender → verify nilkanthtraders82@gmail.com
     """
     if not BREVO_API_KEY:
         raise _EmailError("BREVO_API_KEY not configured", 503)
 
     sender_email = EMAIL_USER or "nilkanthtraders82@gmail.com"
-
-    # Log what we're sending for easier Render debugging
     print(f"[BREVO] Attempting send from {sender_email} to {to_email}")
     print(f"[BREVO] API key prefix: {BREVO_API_KEY[:12]}...")
 
@@ -174,9 +176,9 @@ def _send_via_brevo(
         "https://api.brevo.com/v3/smtp/email",
         data    = payload,
         headers = {
-            "accept":        "application/json",
-            "content-type":  "application/json",
-            "api-key":       BREVO_API_KEY,
+            "accept":       "application/json",
+            "content-type": "application/json",
+            "api-key":      BREVO_API_KEY,
         },
         method="POST",
     )
@@ -188,88 +190,156 @@ def _send_via_brevo(
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         print(f"[BREVO-ERR] HTTP {exc.code}: {body}")
-        # Parse Brevo error for actionable messages
         try:
-            err = json.loads(body)
-            msg = err.get("message", body)
+            msg = json.loads(body).get("message", body)
         except Exception:
             msg = body
         if exc.code == 401:
-            raise _EmailError(
-                "Email API key is invalid. Please contact the administrator.", 500)
+            raise _EmailError("brevo_invalid_key", 500)
         if exc.code == 400 and "sender" in msg.lower():
-            raise _EmailError(
-                "The sender email is not verified in Brevo. "
-                "Please verify nilkanthtraders82@gmail.com in the Brevo dashboard "
-                "(Senders & Domains → Add a sender).", 500)
-        raise _EmailError(
-            f"Email service error ({exc.code}). Please try again later.", 500)
+            raise _EmailError("brevo_sender_unverified", 500)
+        raise _EmailError(f"brevo_error_{exc.code}", 500)
     except urllib.error.URLError as exc:
         print(f"[BREVO-ERR] Network: {exc.reason}")
-        raise _EmailError("Cannot reach email service. Please try again.", 503)
+        raise _EmailError("brevo_network_error", 503)
 
 
-def _send_via_gmail_starttls(subject: str, html: str, to_email: str) -> None:
-    """Gmail SMTP port 587 — may be blocked on Render free tier."""
+# ── Delivery path 2: Gmail SMTP SSL port 465 ─────────────────────────────────
+
+def _send_via_gmail_ssl(subject: str, html: str, to_email: str) -> None:
+    """
+    Gmail SMTP over SSL (port 465). Less likely to be blocked than 587.
+    Requires an App Password if 2FA is enabled on the Gmail account.
+    """
     if not (EMAIL_USER and EMAIL_PASS):
-        raise _EmailError("Gmail credentials not configured", 503)
+        raise _EmailError("gmail_not_configured", 503)
+
+    print(f"[GMAIL-465] Attempting SSL send to {to_email}")
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"]    = EMAIL_USER
         msg["To"]      = to_email
         msg.attach(MIMEText(html, "html"))
+
         ctx = ssl.create_default_context()
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=8) as srv:
-            srv.ehlo(); srv.starttls(context=ctx); srv.ehlo()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx, timeout=10) as srv:
             srv.login(EMAIL_USER, EMAIL_PASS)
             srv.sendmail(EMAIL_USER, to_email, msg.as_string())
-        print(f"[GMAIL-587] Sent to {to_email}")
-    except smtplib.SMTPAuthenticationError:
-        raise _EmailError("Gmail authentication failed. Check credentials.", 500)
+        print(f"[GMAIL-465] Sent successfully to {to_email}")
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"[GMAIL-465-ERR] Auth failed: {e}")
+        raise _EmailError("gmail_auth_failed", 500)
+    except (OSError, smtplib.SMTPException) as e:
+        print(f"[GMAIL-465-WARN] {type(e).__name__}: {e}")
+        raise _EmailError("gmail_465_blocked", 503)
+
+
+# ── Delivery path 3: Gmail SMTP STARTTLS port 587 ────────────────────────────
+
+def _send_via_gmail_starttls(subject: str, html: str, to_email: str) -> None:
+    """
+    Gmail SMTP STARTTLS (port 587). Often blocked on Render free tier.
+    Kept as last-resort fallback.
+    """
+    if not (EMAIL_USER and EMAIL_PASS):
+        raise _EmailError("gmail_not_configured", 503)
+
+    print(f"[GMAIL-587] Attempting STARTTLS send to {to_email}")
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = EMAIL_USER
+        msg["To"]      = to_email
+        msg.attach(MIMEText(html, "html"))
+
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=8) as srv:
+            srv.ehlo()
+            srv.starttls(context=ctx)
+            srv.ehlo()
+            srv.login(EMAIL_USER, EMAIL_PASS)
+            srv.sendmail(EMAIL_USER, to_email, msg.as_string())
+        print(f"[GMAIL-587] Sent successfully to {to_email}")
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"[GMAIL-587-ERR] Auth failed: {e}")
+        raise _EmailError("gmail_auth_failed", 500)
     except (OSError, smtplib.SMTPException) as e:
         print(f"[GMAIL-587-WARN] {type(e).__name__}: {e}")
-        raise _EmailError("Gmail SMTP blocked or unavailable.", 503)
+        raise _EmailError("gmail_587_blocked", 503)
 
+
+# ── Orchestrator: try all paths, raise friendly error if all fail ──────────────
 
 def _send_sync_all(
     to_email: str, to_name: str, otp: str, subject: str, html: str
 ) -> None:
     """
-    Try delivery paths in order. Brevo first (reliable on Render).
-    Falls through to Gmail only if Brevo not configured.
+    Try delivery in order. Returns on first success.
+    If all paths fail, raises _EmailError with a USER-FRIENDLY message
+    (never exposes internal details like 'SMTP blocked' to the client).
     """
-    last_error: _EmailError | None = None
+    errors: list[str] = []
 
-    # ── Path 1: Brevo HTTP API ───────────────────────────────────────────────
+    # ── Path 1: Brevo REST API ───────────────────────────────────────────────
     if BREVO_API_KEY:
         try:
             _send_via_brevo(to_email, to_name, subject, html)
-            return   # success — stop here
+            return
         except _EmailError as e:
-            last_error = e
+            errors.append(f"Brevo: {e.detail}")
             print(f"[EMAIL] Brevo failed: {e.detail}")
 
-    # ── Path 2: Gmail SMTP 587 ───────────────────────────────────────────────
+    # ── Path 2: Gmail SSL 465 ────────────────────────────────────────────────
     if EMAIL_USER and EMAIL_PASS:
         try:
-            _send_via_gmail_starttls(subject, html, to_email)
-            return   # success
+            _send_via_gmail_ssl(subject, html, to_email)
+            return
         except _EmailError as e:
-            last_error = e
-            print(f"[EMAIL] Gmail SMTP 587 failed: {e.detail}")
+            errors.append(f"Gmail-465: {e.detail}")
+            print(f"[EMAIL] Gmail SSL 465 failed: {e.detail}")
 
-    # ── Path 3: Console fallback ─────────────────────────────────────────────
+        # ── Path 3: Gmail STARTTLS 587 ───────────────────────────────────────
+        try:
+            _send_via_gmail_starttls(subject, html, to_email)
+            return
+        except _EmailError as e:
+            errors.append(f"Gmail-587: {e.detail}")
+            print(f"[EMAIL] Gmail STARTTLS 587 failed: {e.detail}")
+
+    # ── Console fallback (always succeeds) ───────────────────────────────────
     print(f"[OTP-FALLBACK] ===========================")
     print(f"[OTP-FALLBACK] OTP for {to_email}: {otp}")
     print(f"[OTP-FALLBACK] ===========================")
-    print(f"[OTP-FALLBACK] Configure BREVO_API_KEY on Render to send emails.")
+    print(f"[OTP-FALLBACK] All email paths failed: {'; '.join(errors)}")
+    print(f"[OTP-FALLBACK] FIX: Set a valid BREVO_API_KEY in Render env vars.")
 
-    # All paths failed — tell user
-    if last_error:
-        raise last_error
+    # Determine best user-facing error message from what failed
+    all_errors = " ".join(errors).lower()
+    if "brevo_invalid_key" in all_errors or "brevo_error_401" in all_errors:
+        raise _EmailError(
+            "We couldn't send the verification code — email service misconfigured. "
+            "Please contact support.",
+            503,
+        )
+    if "brevo_sender_unverified" in all_errors:
+        raise _EmailError(
+            "We couldn't send the verification code — sender not verified. "
+            "Please contact support.",
+            503,
+        )
+    if "gmail_auth_failed" in all_errors:
+        raise _EmailError(
+            "We couldn't send the verification code — email authentication failed. "
+            "Please contact support.",
+            503,
+        )
+    # Generic fallback — never mention SMTP, Brevo, or internal details
     raise _EmailError(
-        "Email service not configured. Please contact the administrator.", 503)
+        "We couldn't send the verification code right now. "
+        "Please try again in a few minutes or contact support.",
+        503,
+    )
 
 
 async def _send_otp_email(to_email: str, otp: str, user_name: str = "User") -> None:
@@ -282,13 +352,12 @@ async def _send_otp_email(to_email: str, otp: str, user_name: str = "User") -> N
             None, _send_sync_all, to_email, user_name, otp, subject, html
         )
     except _EmailError as exc:
-        # Convert our internal error to FastAPI HTTPException
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     except Exception as exc:
         print(f"[EMAIL-ERR] Unexpected: {type(exc).__name__}: {exc}")
         raise HTTPException(
-            status_code=500,
-            detail="Could not send verification email. Please try again."
+            status_code=503,
+            detail="We couldn't send the verification code right now. Please try again."
         )
 
 
@@ -324,7 +393,7 @@ async def forgot_password_initiate(data: ForgotPasswordInitiate):
 
     provided_email = data.email.lower().strip()
     user_name      = user.get("name", "User")
-    otp            = _generate_otp()
+    otp            = _generate_otp(6)
     expiry         = datetime.utcnow() + timedelta(minutes=10)
     otp_col        = database["otp_verifications"]
 
